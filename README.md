@@ -248,7 +248,7 @@ Coming soon.
 
 ## effect-saga/query
 
-Data fetching with caching and stale-while-revalidate, available as a separate import. The query system is itself just a reducer + process — the same primitives available to user-land code.
+Data fetching with caching and stale-while-revalidate, inspired by [SWR](https://swr.vercel.app) and [TanStack Query](https://tanstack.com/query). Available as a separate import. The query system is itself just a reducer + process — the same primitives available to user-land code.
 
 ### How it works
 
