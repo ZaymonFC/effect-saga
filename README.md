@@ -43,11 +43,14 @@ type Action =
 const { takeLatest } = combinators<State, Action>();
 
 // 3. Write a reducer
-const reduce = (state: State, action: Action) => {
+const rootReducer = (state: State, action: Action) => {
   switch (action.id) {
-    case "search":  return { ...state, query: action.data };
-    case "results": return { ...state, results: action.data };
-    default:        return undefined; // no change
+    case "search":
+      return { ...state, query: action.data };
+    case "results":
+      return { ...state, results: action.data };
+    default:
+      return undefined; // no change
   }
 };
 
@@ -59,7 +62,7 @@ const search = takeLatest(["search"], (action, ctx) =>
   }),
 );
 
-const root: Process<State, Action> = (ctx) =>
+const rootProcess: Process<State, Action> = (ctx) =>
   Effect.gen(function* () {
     yield* search(ctx);
     // add more processes here
@@ -68,19 +71,20 @@ const root: Process<State, Action> = (ctx) =>
 // 5. Define the store program
 const storeEffect = makeStore({
   initialState: { query: "", results: [] },
-  reduce,
-  process: root,
+  reduce: rootReducer,
+  process: rootProcess,
 });
 
-// 6. Create a store ref and boot the runtime
+// 6. Create a store ref
 const { ref: store, attach } = createStoreRef<State, Action>({
   query: "",
   results: [],
 });
 
+// Run the store and bind to the store ref with attach
 Effect.runFork(Effect.scoped(storeEffect.pipe(Effect.tap(attach))));
 
-// Use the ref anywhere — actions buffer until attach
+// Use the ref anywhere — actions buffer until the store boots and attaches
 store.subscribe((s) => console.log(s.results));
 store.put({ id: "search", data: "effect-ts" });
 ```
@@ -91,22 +95,26 @@ store.put({ id: "search", data: "effect-ts" });
 
 ### Store
 
-`makeStore` creates a store scoped to the Effect runtime. It returns both Effect-side internals (for processes) and a plain JS handle (for UI):
+`makeStore` returns an Effect that creates a store scoped to the runtime. The store has two faces:
+
+**Processes** receive a `StoreContext` — the Effect-side API for reading state and dispatching actions:
 
 ```ts
-// Effect-side — used by processes
-store.put(action)     // Effect<void>
-store.select()        // Effect<S>
-store.state           // SubscriptionRef<S>
-store.actions         // PubSub<A>
-
-// Plain JS — used by UI
-store.handle.put(action)        // void
-store.handle.getState()         // S
-store.handle.subscribe(fn)      // () => void (unsubscribe)
+ctx.put(action)     // Effect<void> — reduce and publish
+ctx.select()        // Effect<S> — read current state
+ctx.state           // SubscriptionRef<S> — reactive state stream
+ctx.actions         // PubSub<A> — raw action stream
 ```
 
-The bridge between these two worlds is automatic — actions dispatched via the handle are queued and processed by the Effect runtime.
+**UI code** interacts with a `StoreHandle` — a plain JS interface with no Effect types. You get one from `createStoreRef`:
+
+```ts
+store.put(action)        // void — dispatch an action
+store.getState()         // S — read current state
+store.subscribe(fn)      // () => void — subscribe to state changes
+```
+
+For rendering, prefer the [UI integrations](#integration) (`fromStore` for Lit, hooks for React) — they add deep equality checks and framework-native reactivity on top of the raw `StoreHandle`.
 
 ### `createStoreRef`
 
@@ -122,8 +130,8 @@ ref.put({ id: "early-action" });
 ref.subscribe((s) => render(s));
 
 // Later, when the Effect runtime is ready:
-const store = yield* makeStore(config);
-attach(store);  // flushes buffered actions, replays subscribers
+const store = yield * makeStore(config);
+attach(store); // flushes buffered actions, replays subscribers
 ```
 
 ### Reducers
@@ -170,13 +178,13 @@ const myProcess: Process<State, Action> = (ctx) =>
 
 Saga-style concurrency strategies for handling actions. Each returns a `Process` you can compose into your root process.
 
-| Combinator | Behavior |
-|---|---|
-| `takeEvery(ids, handler)` | Fork a handler for every match. No cancellation. |
-| `takeLatest(ids, handler)` | Cancel the previous handler, fork a new one. |
-| `takeLeading(ids, handler)` | Ignore new triggers while a handler is running. |
-| `debounce(duration, ids, handler)` | Wait for a quiet period, then run once. |
-| `take(ctx, ids)` | Suspend until a matching action arrives (one-shot). |
+| Combinator                         | Behavior                                            |
+| ---------------------------------- | --------------------------------------------------- |
+| `takeEvery(ids, handler)`          | Fork a handler for every match. No cancellation.    |
+| `takeLatest(ids, handler)`         | Cancel the previous handler, fork a new one.        |
+| `takeLeading(ids, handler)`        | Ignore new triggers while a handler is running.     |
+| `debounce(duration, ids, handler)` | Wait for a quiet period, then run once.             |
+| `take(ctx, ids)`                   | Suspend until a matching action arrives (one-shot). |
 
 Each combinator subscribes to the action stream and forks a long-lived listener fiber. Calling `yield* search(ctx)` sets up the listener and **returns immediately** — it doesn't block. So yielding multiple combinators in sequence starts concurrent listeners, not a sequential chain. Processes compose the same way: a sub-process yields to its combinators, and the root process yields to sub-processes.
 
@@ -235,7 +243,9 @@ import { fromStore } from "effect-saga/lit";
 
 class MyComponent extends LitElement {
   private count = fromStore(this, store, (s) => s.count);
-  private active = fromStore(this, store, (s) => s.items.filter((i) => i.active));
+  private active = fromStore(this, store, (s) =>
+    s.items.filter((i) => i.active),
+  );
 
   render() {
     return html`
@@ -260,12 +270,12 @@ A query is defined by a `derive` function that runs on every state change. `deri
 
 The query process reconciles derived entries against what's already cached or in-flight:
 
-| Cached | In-flight | Action |
-|---|---|---|
-| no | no | Fork a new fetch |
-| yes | no | Skip — serve cached data |
-| no | yes | Interrupt and refetch (inputs changed mid-flight) |
-| yes | yes | Leave alone — serve stale data while refetch completes (SWR) |
+| Cached | In-flight | Action                                                       |
+| ------ | --------- | ------------------------------------------------------------ |
+| no     | no        | Fork a new fetch                                             |
+| yes    | no        | Skip — serve cached data                                     |
+| no     | yes       | Interrupt and refetch (inputs changed mid-flight)            |
+| yes    | yes       | Leave alone — serve stale data while refetch completes (SWR) |
 
 Invalidation clears the cache; the next reconciliation triggers a fresh fetch. Currently the app controls staleness via invalidation actions — built-in TTL support is coming soon.
 
@@ -277,7 +287,11 @@ Invalidation clears the cache; the next reconciliation triggers a fresh fetch. C
 - **Multi query** — return an array of `{ key, fetch }` entries. Each is independently cached and fetched. Read individual entries with `query.selectByKey(state, key)`.
 
 ```ts
-import { defineQuery, queriesReducer, initialQueriesState } from "effect-saga/query";
+import {
+  defineQuery,
+  queriesReducer,
+  initialQueriesState,
+} from "effect-saga/query";
 
 // Single: one user at a time
 const userQuery = defineQuery<User, AppState>("user", (state) =>
@@ -285,11 +299,13 @@ const userQuery = defineQuery<User, AppState>("user", (state) =>
 );
 
 // Multi: many entries derived from state
-const categoryTxQuery = defineQuery<Transaction[], AppState>("categoryTx", (state) =>
-  state.expandedCategories.map((cat) => ({
-    key: cat,
-    fetch: fetchTransactions(cat),
-  })),
+const categoryTxQuery = defineQuery<Transaction[], AppState>(
+  "categoryTx",
+  (state) =>
+    state.expandedCategories.map((cat) => ({
+      key: cat,
+      fetch: fetchTransactions(cat),
+    })),
 );
 ```
 
@@ -320,7 +336,7 @@ import "effect-saga/query-devtools";
 ```
 
 ```html
-<query-devtools .store=${store.handle}></query-devtools>
+<query-devtools .store="${store.handle}"></query-devtools>
 ```
 
 Implemented in Lit and available as a standard web component — drop it into any framework! Renders a panel showing all cached queries, their status, timestamps, and manual invalidation controls.
