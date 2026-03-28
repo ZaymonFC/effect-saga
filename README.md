@@ -2,7 +2,7 @@
 
 State management with saga-pattern side effects, built on [Effect-TS](https://effect.website) structured concurrency.
 
-The saga pattern with real structured concurrency — typed cancellation, scoped lifetimes, and fiber-based coordination powered by Effect's runtime.
+The saga pattern — long-running processes that listen for actions and coordinate side effects — with real structured concurrency: typed cancellation, scoped lifetimes, and fiber-based coordination powered by Effect's runtime.
 
 > ⚠️ **Pre-1.0 experimental release.** The API is unstable and may change between versions. Expect breaking changes without notice.
 
@@ -174,6 +174,8 @@ Saga-style concurrency strategies for handling actions. Each returns a `Process`
 | `debounce(duration, ids, handler)` | Wait for a quiet period, then run once. |
 | `take(ctx, ids)` | Suspend until a matching action arrives (one-shot). |
 
+Each combinator subscribes to the action stream and forks a long-lived listener fiber. Calling `yield* search(ctx)` sets up the listener and **returns immediately** — it doesn't block. So yielding multiple combinators in sequence starts concurrent listeners, not a sequential chain. Processes compose the same way: a sub-process yields to its combinators, and the root process yields to sub-processes.
+
 ```ts
 import { combinators } from "effect-saga";
 import type { Process } from "effect-saga";
@@ -200,7 +202,7 @@ const autoSave = debounce("500 millis", ["editor/change"], (action, ctx) =>
   }),
 );
 
-// Compose into a root process
+// Each yield* starts a listener and returns immediately — all run concurrently
 const root: Process<State, Action> = (ctx) =>
   Effect.gen(function* () {
     yield* search(ctx);
@@ -244,36 +246,26 @@ class MyComponent extends LitElement {
 
 Coming soon.
 
-## Query system
+## effect-saga/query
 
 Data fetching with caching and stale-while-revalidate, available as a separate import. The query system is itself just a reducer + process — the same primitives available to user-land code.
 
-```ts
-import { defineQuery, queriesReducer, initialQueriesState } from "effect-saga/query";
+### How it works
 
-const userQuery = defineQuery<User, AppState>("user", (state) =>
-  state.userId
-    ? { key: state.userId, fetch: fetchUser(state.userId) }
-    : null,
-);
+A query is defined by a `derive` function that runs on every state change. `derive` inspects the current state and returns what should be fetched: a `{ key, fetch }` entry, an array of entries, or `null` (nothing needed right now).
 
-// Wire into your store
-const reduce = combineReducers({
-  queries: queriesReducer,
-  // ...other slices
-});
+The query process reconciles derived entries against what's already cached or in-flight:
 
-// In your root process
-const rootProcess: Process<AppState, AppAction> = (ctx) =>
-  Effect.gen(function* () {
-    yield* userQuery.process(ctx);
-  });
+| Cached | In-flight | Action |
+|---|---|---|
+| no | no | Fork a new fetch |
+| yes | no | Skip — serve cached data |
+| no | yes | Interrupt and refetch (inputs changed mid-flight) |
+| yes | yes | Leave alone — serve stale data while refetch completes (SWR) |
 
-// Read cached data
-const cached = userQuery.select(store.handle.getState());
-```
+Invalidation clears the cache; the next reconciliation triggers a fresh fetch. There is no built-in TTL — the app controls staleness via invalidation actions.
 
-Queries are derived from state — when the inputs change, the query re-evaluates. Cached data is served immediately while refetches happen in the background.
+### Defining queries
 
 `defineQuery` supports two modes based on what the derive function returns:
 
@@ -281,6 +273,8 @@ Queries are derived from state — when the inputs change, the query re-evaluate
 - **Multi query** — return an array of `{ key, fetch }` entries. Each is independently cached and fetched. Read individual entries with `query.selectByKey(state, key)`.
 
 ```ts
+import { defineQuery, queriesReducer, initialQueriesState } from "effect-saga/query";
+
 // Single: one user at a time
 const userQuery = defineQuery<User, AppState>("user", (state) =>
   state.userId ? { key: state.userId, fetch: fetchUser(state.userId) } : null,
@@ -293,6 +287,26 @@ const categoryTxQuery = defineQuery<Transaction[], AppState>("categoryTx", (stat
     fetch: fetchTransactions(cat),
   })),
 );
+```
+
+### Wiring into your store
+
+```ts
+// Add the query reducer to your store
+const reduce = combineReducers({
+  queries: queriesReducer,
+  // ...other slices
+});
+
+// Register query processes alongside your other processes
+const rootProcess: Process<AppState, AppAction> = (ctx) =>
+  Effect.gen(function* () {
+    yield* userQuery.process(ctx);
+    yield* categoryTxQuery.process(ctx);
+  });
+
+// Read cached data from the UI
+const cached = userQuery.select(store.handle.getState());
 ```
 
 ### Query devtools
