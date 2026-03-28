@@ -12,7 +12,7 @@ Redux-saga showed that long-running processes coordinating side effects via acti
 
 Effect-TS has a real fiber runtime with all of this built in. effect-saga connects it to a minimal store (reducer + action stream) with the familiar saga combinators (`takeEvery`, `takeLatest`, `takeLeading`, `debounce`) — except now they use real fiber interruption, scoped lifetimes, and typed effects.
 
-The key design constraint: **Effect types never leak to the UI.** The store exposes a plain JS `StoreHandle` — `put`, `subscribe`, `getState` — that any framework can consume. Processes run in Effect-land with full access to the fiber runtime.
+The key design constraint: **Effect types never leak to the UI.** The store exposes a plain JS `StoreHandle` — `put`, `subscribe`, `getState` — that any framework can consume. Processes run in Effect-land with full access to the fiber runtime. The core is UI-agnostic; framework bindings are thin adapters. Lit is supported today, React is coming soon.
 
 ## Install
 
@@ -27,44 +27,53 @@ deno add npm:effect-saga npm:effect
 ## Quick start
 
 ```ts
-import { makeStore, takeLatest } from "effect-saga";
+import { combinators, makeStore } from "effect-saga";
+import type { Process } from "effect-saga";
 import { Effect } from "effect";
 
 // 1. Define your state and actions
 type State = { query: string; results: string[] };
 type Action =
-  | { id: "search"; query: string }
-  | { id: "results"; results: string[] };
+  | { id: "search"; data: string }
+  | { id: "results"; data: string[] };
 
-// 2. Write a reducer
+// 2. Bind combinators to your types once
+const { takeLatest } = combinators<State, Action>();
+
+// 3. Write a reducer
 const reduce = (state: State, action: Action) => {
   switch (action.id) {
-    case "search":  return { ...state, query: action.query };
-    case "results": return { ...state, results: action.results };
+    case "search":  return { ...state, query: action.data };
+    case "results": return { ...state, results: action.data };
+    default:        return undefined; // no change — preserves reference
   }
 };
 
-// 3. Write a process — a long-running Effect that coordinates side effects
-const searchProcess = takeLatest<State, Action, "search", never>(
-  ["search"],
-  (action, ctx) =>
-    Effect.gen(function* () {
-      const results = yield* fetchResults(action.query);
-      yield* ctx.put({ id: "results", results });
-    }),
+// 4. Write processes — long-running Effects that coordinate side effects
+const search = takeLatest(["search"], (action, ctx) =>
+  Effect.gen(function* () {
+    const results = yield* fetchResults(action.data);
+    yield* ctx.put({ id: "results", data: results });
+  }),
 );
 
-// 4. Create the store
+const root: Process<State, Action> = (ctx) =>
+  Effect.gen(function* () {
+    yield* search(ctx);
+    // add more processes here
+  });
+
+// 5. Create the store
 const program = Effect.gen(function* () {
   const store = yield* makeStore({
     initialState: { query: "", results: [] },
     reduce,
-    process: searchProcess,
+    process: root,
   });
 
   // The handle is plain JS — use it anywhere
   store.handle.subscribe((s) => console.log(s.results));
-  store.handle.put({ id: "search", query: "effect-ts" });
+  store.handle.put({ id: "search", data: "effect-ts" });
 });
 
 Effect.runFork(Effect.scoped(program));
@@ -99,6 +108,7 @@ Standard `(state, action) => state` with one twist: returning `undefined` means 
 
 ```ts
 import { combineReducers } from "effect-saga";
+import type { Reducer, StateOf, ActionsOf } from "effect-saga";
 
 const rootReducer = combineReducers({
   users: usersReducer,
@@ -106,6 +116,9 @@ const rootReducer = combineReducers({
 });
 // If postsReducer returns undefined, rootReducer returns the same
 // state object — same reference, no unnecessary re-renders.
+
+type AppState = StateOf<typeof rootReducer>;
+type AppAction = ActionsOf<typeof rootReducer>;
 ```
 
 ### Processes
@@ -123,16 +136,15 @@ const myProcess: Process<State, Action> = (ctx) =>
     // Dispatch actions
     yield* ctx.put({ id: "loaded", data });
 
-    // Subscribe to state changes
-    yield* ctx.state.changes.pipe(
-      Stream.runForEach((s) => Effect.log(s)),
-    );
+    // Compose sub-processes
+    yield* someHandler(ctx);
+    yield* anotherHandler(ctx);
   });
 ```
 
-## Combinators
+### Combinators
 
-Saga-style concurrency strategies for handling actions. Each returns a `Process` you can pass to `makeStore`.
+Saga-style concurrency strategies for handling actions. Each returns a `Process` you can compose into your root process.
 
 | Combinator | Behavior |
 |---|---|
@@ -144,28 +156,49 @@ Saga-style concurrency strategies for handling actions. Each returns a `Process`
 
 ```ts
 import { combinators } from "effect-saga";
+import type { Process } from "effect-saga";
 
-// Pre-bind your state/action types once
+// Bind your state/action types once — all combinators are fully typed from here
 const { takeLatest, takeEvery, debounce } = combinators<State, Action>();
 
-const rootProcess: Process<State, Action> = (ctx) =>
+// Define handlers as standalone values
+const search = takeLatest(["search"], (action, ctx) =>
   Effect.gen(function* () {
-    yield* takeLatest(["search"], searchHandler)(ctx);
-    yield* takeEvery(["analytics/track"], trackHandler)(ctx);
-    yield* debounce("500 millis", ["editor/change"], autoSaveHandler)(ctx);
+    const results = yield* fetchResults(action.data);
+    yield* ctx.put({ id: "results", data: results });
+  }),
+);
+
+const track = takeEvery(["analytics/track"], (action, ctx) =>
+  Effect.log(`tracked: ${action.data}`),
+);
+
+const autoSave = debounce("500 millis", ["editor/change"], (action, ctx) =>
+  Effect.gen(function* () {
+    const state = yield* ctx.select();
+    yield* save(state);
+  }),
+);
+
+// Compose into a root process
+const root: Process<State, Action> = (ctx) =>
+  Effect.gen(function* () {
+    yield* search(ctx);
+    yield* track(ctx);
+    yield* autoSave(ctx);
   });
 ```
 
-## Extras
+### Value equality
 
-### `combineReducers`
+Unnecessary re-renders are avoided at two levels:
 
-Combines a record of reducers into one. Preserves structural sharing — the combined state object reference is stable when no slice changes.
+1. **Reducers** — returning `undefined` means "no change", preserving the previous state reference. `combineReducers` only allocates a new object when at least one slice actually changed.
+2. **Selectors** — UI bindings like `fromStore` use deep equality (`fast-equals`) to compare selected values. Even if the state reference changes, the component only re-renders when the selected slice is structurally different.
 
-```ts
-type StateOf<R>    // Extract state type from a reducer
-type ActionsOf<R>  // Extract action type from a reducer
-```
+Together these mean you can freely select derived data (filtered lists, computed objects) without worrying about spurious updates.
+
+## Integration
 
 ### `createStoreRef`
 
@@ -185,9 +218,33 @@ const store = yield* makeStore(config);
 attach(store);  // flushes buffered actions, replays subscribers
 ```
 
-### Query system
+### Lit
 
-Built-in data fetching with caching and stale-while-revalidate:
+Reactive controller for [Lit](https://lit.dev) components. Selectors are compared with deep equality — derived objects and filtered arrays won't cause re-renders unless the values actually change.
+
+```ts
+import { fromStore } from "effect-saga/lit";
+
+class MyComponent extends LitElement {
+  private count = fromStore(this, store, (s) => s.count);
+  private active = fromStore(this, store, (s) => s.items.filter((i) => i.active));
+
+  render() {
+    return html`
+      <p>Count: ${this.count.value}, Active: ${this.active.value.length}</p>
+      <button @click=${() => store.put({ id: "increment" })}>+1</button>
+    `;
+  }
+}
+```
+
+### React
+
+Coming soon.
+
+## Query system
+
+Built-in data fetching with caching and stale-while-revalidate, available as a separate import:
 
 ```ts
 import { defineQuery, queriesReducer, initialQueriesState } from "effect-saga/query";
@@ -216,23 +273,25 @@ const cached = userQuery.select(store.handle.getState());
 
 Queries are derived from state — when the inputs change, the query re-evaluates. Cached data is served immediately while refetches happen in the background.
 
-### Lit integration
+`defineQuery` supports two modes based on what the derive function returns:
 
-Reactive controller for [Lit](https://lit.dev) components:
+- **Single query** — return a `{ key, fetch }` object (or `null` to skip). Read with `query.select(state)`.
+- **Multi query** — return an array of `{ key, fetch }` entries. Each is independently cached and fetched. Read individual entries with `query.selectByKey(state, key)`.
 
 ```ts
-import { fromStore } from "effect-saga/lit";
+// Single: one user at a time
+const userQuery = defineQuery<User, AppState>("user", (state) =>
+  state.userId ? { key: state.userId, fetch: fetchUser(state.userId) } : null,
+);
 
-class MyComponent extends LitElement {
-  private count = fromStore(this, store, (s) => s.count);
-
-  render() {
-    return html`<p>Count: ${this.count.value}</p>`;
-  }
-}
+// Multi: many entries derived from state
+const categoryTxQuery = defineQuery<Transaction[], AppState>("categoryTx", (state) =>
+  state.expandedCategories.map((cat) => ({
+    key: cat,
+    fetch: fetchTransactions(cat),
+  })),
+);
 ```
-
-Deep equality prevents spurious re-renders when the selected slice is structurally identical.
 
 ### Query devtools
 
@@ -246,9 +305,10 @@ import "effect-saga/query-devtools";
 
 Renders a panel showing all cached queries, their status, timestamps, and manual invalidation controls.
 
+![Query devtools panel](docs/query-devtools.png)
+
 ## Design decisions
 
-- **8,192-action bounded queue** bridges imperative `put()` calls to the Effect runtime. Overflow throws — if you hit it, you have a bug.
 - **`undefined` return convention** in reducers enables structural sharing without immer or immutable.js.
 - **Fiber-based cancellation** means `takeLatest` and `debounce` use real interruption, not boolean flags.
 - **No middleware** — processes are the only extension point. They compose naturally via Effect.
