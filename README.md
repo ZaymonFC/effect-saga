@@ -2,15 +2,15 @@
 
 State management with saga-pattern side effects, built on [Effect-TS](https://effect.website) structured concurrency.
 
-The saga pattern done right — Effect's fiber runtime gives you typed cancellation, scoped lifetimes, and structured concurrency where redux-saga gave you generator tricks and a prayer.
+The saga pattern with real structured concurrency — typed cancellation, scoped lifetimes, and fiber-based coordination powered by Effect's runtime.
 
 > **Early experimental release.** The API is unstable and may change between versions. Expect breaking changes without notice.
 
 ## Why
 
-Redux-saga showed that long-running processes coordinating side effects via actions is a great model. But its use of generators is a hack — `yield` simulates concurrency without actually having it. Cancellation is bolted on, error handling is stringly-typed, and there's no structured lifetime management.
+Redux-saga showed that long-running processes coordinating side effects via actions is a powerful model. effect-saga brings that model to Effect-TS — a real fiber runtime with typed cancellation, scoped lifetimes, and structured concurrency built in.
 
-Effect-TS has a real fiber runtime with all of this built in. effect-saga connects it to a minimal store (reducer + action stream) with the familiar saga combinators (`takeEvery`, `takeLatest`, `takeLeading`, `debounce`) — except now they use real fiber interruption, scoped lifetimes, and typed effects.
+effect-saga connects a minimal store (reducer + action stream) with the familiar saga combinators (`takeEvery`, `takeLatest`, `takeLeading`, `debounce`) — backed by real fiber interruption and typed effects. Because processes are plain Effects, all the async machinery — retries, timeouts, scheduling, resource management, dependency injection — comes from the Effect ecosystem natively. No reinventing the wheel.
 
 The key design constraint: **Effect types never leak to the UI.** The store exposes a plain JS `StoreHandle` — `put`, `subscribe`, `getState` — that any framework can consume. Processes run in Effect-land with full access to the fiber runtime. The core is UI-agnostic; framework bindings are thin adapters. Lit is supported today, React is coming soon.
 
@@ -45,7 +45,7 @@ const reduce = (state: State, action: Action) => {
   switch (action.id) {
     case "search":  return { ...state, query: action.data };
     case "results": return { ...state, results: action.data };
-    default:        return undefined; // no change — preserves reference
+    default:        return undefined; // no change
   }
 };
 
@@ -202,7 +202,7 @@ Together these mean you can freely select derived data (filtered lists, computed
 
 ### `createStoreRef`
 
-A deferred store handle for use before the Effect runtime boots. Actions and subscriptions are buffered and replayed on attach:
+Effect boots asynchronously, but your UI needs a store reference at import time. `createStoreRef` bridges this gap — it returns a handle you can use immediately, buffering actions and subscriptions until the real store is ready:
 
 ```ts
 import { createStoreRef } from "effect-saga";
@@ -244,7 +244,7 @@ Coming soon.
 
 ## Query system
 
-Built-in data fetching with caching and stale-while-revalidate, available as a separate import:
+Data fetching with caching and stale-while-revalidate, available as a separate import. The query system is itself just a reducer + process — the same primitives available to user-land code.
 
 ```ts
 import { defineQuery, queriesReducer, initialQueriesState } from "effect-saga/query";
@@ -303,15 +303,9 @@ import "effect-saga/query-devtools";
 <query-devtools .store=${store.handle}></query-devtools>
 ```
 
-Renders a panel showing all cached queries, their status, timestamps, and manual invalidation controls.
+Implemented in Lit and available as a standard web component — drop it into any framework! Renders a panel showing all cached queries, their status, timestamps, and manual invalidation controls.
 
 ![Query devtools panel](docs/query-devtools.png)
-
-## Design decisions
-
-- **`undefined` return convention** in reducers enables structural sharing without immer or immutable.js.
-- **Fiber-based cancellation** means `takeLatest` and `debounce` use real interruption, not boolean flags.
-- **No middleware** — processes are the only extension point. They compose naturally via Effect.
 
 ## License
 
