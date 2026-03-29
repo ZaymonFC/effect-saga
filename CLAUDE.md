@@ -1,4 +1,4 @@
-# effect-saga
+# katha
 
 Saga-pattern state management built on Effect-TS structured concurrency.
 

@@ -25,13 +25,13 @@ await build({
     "npm:date-fns@^4.1.0": { name: "date-fns", version: "^4.1.0", peerDependency: true },
   },
   package: {
-    name: "@zaymonoid/effect-saga",
+    name: "@zaymonoid/katha",
     version: Deno.args[0] ?? "0.1.0",
     description: "Saga-pattern state management built on Effect-TS structured concurrency",
     license: "MIT",
     repository: {
       type: "git",
-      url: "git+https://github.com/ZaymonFC/effect-saga.git",
+      url: "git+https://github.com/ZaymonFC/katha.git",
     },
     dependencies: {
       effect: "^3.0.0",

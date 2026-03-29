@@ -1,8 +1,8 @@
-# effect-saga
+# katha
 
-State management with saga-pattern side effects, built on [Effect-TS](https://effect.website) structured concurrency.
+Core state management and sagas in [Effect-TS](https://effect.website).
 
-The saga pattern — long-running processes that listen for actions and coordinate side effects — with real structured concurrency: typed cancellation, scoped lifetimes, and fiber-based coordination powered by Effect's runtime.
+A minimal store (reducers, action stream, selectors) plus the saga pattern — long-running processes that listen for actions and coordinate side effects — with real structured concurrency: typed cancellation, scoped lifetimes, and fiber-based coordination powered by Effect's runtime.
 
 > ⚠️ **Pre-1.0 experimental release.** The API is unstable and may change between versions. Expect breaking changes without notice.
 
@@ -10,27 +10,27 @@ The saga pattern — long-running processes that listen for actions and coordina
 
 As Effect grows in popularity, developers need a way to manage application state that leverages the runtime they're already using — without being locked to a specific UI framework.
 
-Redux-saga showed that long-running processes coordinating side effects via actions is a powerful model. effect-saga brings that model to Effect-TS — a real fiber runtime with typed cancellation, scoped lifetimes, and structured concurrency built in.
+Redux-saga showed that long-running processes coordinating side effects via actions is a powerful model. katha brings that model to Effect-TS — a real fiber runtime with typed cancellation, scoped lifetimes, and structured concurrency built in.
 
-effect-saga connects a minimal store (reducer + action stream) with the familiar saga combinators (`takeEvery`, `takeLatest`, `takeLeading`, `debounce`) — backed by real fiber interruption and typed effects. Because processes are plain Effects, all the async machinery — retries, timeouts, scheduling, resource management, dependency injection — comes from the Effect ecosystem natively. No reinventing the wheel.
+katha connects a minimal store (reducer + action stream) with the familiar saga combinators (`takeEvery`, `takeLatest`, `takeLeading`, `debounce`) — backed by real fiber interruption and typed effects. Because processes are plain Effects, all the async machinery — retries, timeouts, scheduling, resource management, dependency injection — comes from the Effect ecosystem natively. No reinventing the wheel.
 
-**Leverage the power of Effect for state, and let UI libraries do the thing they're actually good at.** Bridge effect-saga natively into your reactive UI library of choice — [React](#react) via hooks, [Lit](#lit) via reactive controllers. First class developer experience on both sides of the fold.
+**Leverage the power of Effect for state, and let UI libraries do the thing they're actually good at.** Bridge katha natively into your reactive UI library of choice — [React](#react) via hooks, [Lit](#lit) via reactive controllers. First class developer experience on both sides of the fold.
 
 ## Install
 
 ```bash
 # npm
-npm install @zaymonoid/effect-saga effect
+npm install @zaymonoid/katha effect
 
 # deno
-deno add jsr:@zaymonoid/effect-saga npm:effect
+deno add jsr:@zaymonoid/katha npm:effect
 ```
 
 ## Quick start
 
 ```ts
-import { combinators, createStoreRef, makeStore } from "@zaymonoid/effect-saga";
-import type { Process } from "@zaymonoid/effect-saga";
+import { combinators, createStoreRef, makeStore } from "@zaymonoid/katha";
+import type { Process } from "@zaymonoid/katha";
 import { Effect } from "effect";
 
 // 1. Define your state and actions
@@ -121,7 +121,7 @@ For rendering, prefer the [UI integrations](#integration) (`fromStore` for Lit, 
 Effect boots asynchronously, but your app needs a store reference at import time. `createStoreRef` bridges this gap — it returns a `StoreHandle` you can use immediately, buffering actions and subscriptions until the real store is attached and ready:
 
 ```ts
-import { createStoreRef } from "@zaymonoid/effect-saga";
+import { createStoreRef } from "@zaymonoid/katha";
 
 const { ref, attach } = createStoreRef<State, Action>(initialState);
 
@@ -139,8 +139,8 @@ attach(store); // flushes buffered actions, replays subscribers
 Standard `(state, action) => state` with one twist: returning `undefined` means "no change". This enables `combineReducers` to preserve referential equality when a slice doesn't handle an action:
 
 ```ts
-import { combineReducers } from "@zaymonoid/effect-saga";
-import type { Reducer, StateOf, ActionsOf } from "@zaymonoid/effect-saga";
+import { combineReducers } from "@zaymonoid/katha";
+import type { Reducer, StateOf, ActionsOf } from "@zaymonoid/katha";
 
 const rootReducer = combineReducers({
   users: usersReducer,
@@ -158,7 +158,7 @@ type AppAction = ActionsOf<typeof rootReducer>;
 A process is an Effect that runs for the lifetime of the store. It receives a `StoreContext` with access to the action stream and state:
 
 ```ts
-import type { Process } from "@zaymonoid/effect-saga";
+import type { Process } from "@zaymonoid/katha";
 
 const myProcess: Process<State, Action> = (ctx) =>
   Effect.gen(function* () {
@@ -189,8 +189,8 @@ Saga-style concurrency strategies for handling actions. Each returns a `Process`
 Each combinator subscribes to the action stream and forks a long-lived listener fiber. Calling `yield* search(ctx)` sets up the listener and **returns immediately** — it doesn't block. So yielding multiple combinators in sequence starts concurrent listeners, not a sequential chain. Processes compose the same way: a sub-process yields to its combinators, and the root process yields to sub-processes.
 
 ```ts
-import { combinators } from "@zaymonoid/effect-saga";
-import type { Process } from "@zaymonoid/effect-saga";
+import { combinators } from "@zaymonoid/katha";
+import type { Process } from "@zaymonoid/katha";
 
 // Bind your state/action types once — all combinators are fully typed from here
 const { takeLatest, takeEvery, debounce } = combinators<State, Action>();
@@ -239,7 +239,7 @@ Together these mean you can freely select derived data (filtered lists, computed
 Reactive controller for [Lit](https://lit.dev) components. Selectors are compared with deep equality — derived objects and filtered arrays won't cause re-renders unless the values actually change.
 
 ```ts
-import { fromStore } from "@zaymonoid/effect-saga/lit";
+import { fromStore } from "@zaymonoid/katha/lit";
 
 class MyComponent extends LitElement {
   private count = fromStore(this, store, (s) => s.count);
@@ -260,7 +260,7 @@ class MyComponent extends LitElement {
 
 Coming soon.
 
-## effect-saga/query
+## katha/query
 
 Data fetching with caching and stale-while-revalidate, inspired by [SWR](https://swr.vercel.app) and [TanStack Query](https://tanstack.com/query). Available as a separate import. The query system is itself just a reducer + process — the same primitives available to user-land code.
 
@@ -291,7 +291,7 @@ import {
   defineQuery,
   queriesReducer,
   initialQueriesState,
-} from "@zaymonoid/effect-saga/query";
+} from "@zaymonoid/katha/query";
 
 // Single: one user at a time
 const userQuery = defineQuery<User, AppState>("user", (state) =>
@@ -332,7 +332,7 @@ const cached = userQuery.select(store.handle.getState());
 ### Query devtools
 
 ```ts
-import "@zaymonoid/effect-saga/query-devtools";
+import "@zaymonoid/katha/query-devtools";
 ```
 
 ```html
