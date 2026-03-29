@@ -1,6 +1,6 @@
 # katha
 
-> **katha** /kə.tʰɑː/ *n. Sanskrit* — a story; a narrative told in sequence, where each event arises from the last and shapes what follows.
+> **katha** /kə.tʰɑː/ _n. Sanskrit_ — a story; a narrative told in sequence, where each event arises from the last and shapes what follows.
 
 Core state management and sagas in [Effect-TS](https://effect.website).
 
@@ -28,7 +28,7 @@ npm install @zaymonoid/katha effect
 deno add jsr:@zaymonoid/katha npm:effect
 ```
 
-## Foreword
+## Quick start
 
 ```ts
 import { combinators, createStoreRef, makeStore } from "@zaymonoid/katha";
@@ -102,18 +102,18 @@ store.put({ id: "search", data: "effect-ts" });
 **Processes** receive a `StoreContext` — the Effect-side API for reading state and dispatching actions:
 
 ```ts
-ctx.put(action)     // Effect<void> — reduce and publish
-ctx.select()        // Effect<S> — read current state
-ctx.state           // SubscriptionRef<S> — reactive state stream
-ctx.actions         // PubSub<A> — raw action stream
+ctx.put(action); // Effect<void> — reduce and publish
+ctx.select(); // Effect<S> — read current state
+ctx.state; // SubscriptionRef<S> — reactive state stream
+ctx.actions; // PubSub<A> — raw action stream
 ```
 
 **UI code** interacts with a `StoreHandle` — a plain JS interface with no Effect types. You get one from `createStoreRef`:
 
 ```ts
-store.put(action)        // void — dispatch an action
-store.getState()         // S — read current state
-store.subscribe(fn)      // () => void — subscribe to state changes
+store.put(action); // void — dispatch an action
+store.getState(); // S — read current state
+store.subscribe(fn); // () => void — subscribe to state changes
 ```
 
 For rendering, prefer the [UI integrations](#integration) (`fromStore` for Lit, hooks for React) — they add deep equality checks and framework-native reactivity on top of the raw `StoreHandle`.
