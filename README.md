@@ -1,12 +1,14 @@
 # katha
 
+> **katha** /kə.tʰɑː/ *n. Sanskrit* — a story; a narrative told in sequence, where each event arises from the last and shapes what follows.
+
 Core state management and sagas in [Effect-TS](https://effect.website).
 
 A minimal store (reducers, action stream, selectors) plus the saga pattern — long-running processes that listen for actions and coordinate side effects — with real structured concurrency: typed cancellation, scoped lifetimes, and fiber-based coordination powered by Effect's runtime.
 
 > ⚠️ **Pre-1.0 experimental release.** The API is unstable and may change between versions. Expect breaking changes without notice.
 
-## Why
+## In the Beginning
 
 As Effect grows in popularity, developers need a way to manage application state that leverages the runtime they're already using — without being locked to a specific UI framework.
 
@@ -26,7 +28,7 @@ npm install @zaymonoid/katha effect
 deno add jsr:@zaymonoid/katha npm:effect
 ```
 
-## Quick start
+## Foreword
 
 ```ts
 import { combinators, createStoreRef, makeStore } from "@zaymonoid/katha";
