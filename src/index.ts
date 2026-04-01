@@ -1,3 +1,13 @@
+/**
+ * Core API for katha — saga-pattern state management built on Effect-TS.
+ *
+ * Re-exports store construction ({@linkcode makeStore}, {@linkcode createStoreRef}),
+ * reducer utilities ({@linkcode combineReducers}), and saga combinators
+ * ({@linkcode takeEvery}, {@linkcode takeLatest}, {@linkcode takeLeading}, etc.).
+ *
+ * @module
+ */
+
 export type { CombinatorSet } from "./combinators.ts";
 export {
   combinators,

@@ -1,3 +1,14 @@
+/**
+ * Declarative data-fetching layer built on katha stores.
+ *
+ * Define queries with {@linkcode defineQuery}, wire the provided
+ * {@linkcode queriesReducer} into your store via `combineReducers`, and the
+ * query process handles fetch orchestration, caching, and invalidation
+ * automatically.
+ *
+ * @module
+ */
+
 import { Effect, Either, Fiber, Ref, type Scope, Stream } from "effect";
 import type { Reducer } from "./reducer.ts";
 import type { Action, StoreContext } from "./types.ts";
@@ -6,8 +17,10 @@ import type { Action, StoreContext } from "./types.ts";
 // Types
 // ---------------------------------------------------------------------------
 
+/** Lifecycle state of a single query. */
 export type QueryStatus = "loading" | "success" | "error";
 
+/** Snapshot of a single query's cache entry. */
 export interface QueryState<T> {
   readonly status: QueryStatus;
   readonly data: T | undefined;
@@ -16,6 +29,7 @@ export interface QueryState<T> {
   readonly dataUpdatedAt: number | undefined;
 }
 
+/** The queries slice of store state — a record of cache entries keyed by query ID. */
 export interface QueriesState {
   readonly cache: Record<string, QueryState<unknown>>;
 }
@@ -24,6 +38,7 @@ export interface QueriesState {
 // Actions
 // ---------------------------------------------------------------------------
 
+/** Discriminated union of actions dispatched by the query process. */
 export type QueriesAction =
   | { readonly id: "query-started"; readonly data: { readonly queryId: string } }
   | {
@@ -44,8 +59,10 @@ export type QueriesAction =
 // Reducer
 // ---------------------------------------------------------------------------
 
+/** Empty initial state for the queries slice. */
 export const initialQueriesState: QueriesState = { cache: {} };
 
+/** Reducer that handles {@linkcode QueriesAction} to maintain the query cache. */
 export const queriesReducer: Reducer<QueriesState, QueriesAction> = (state, action) => {
   switch (action.id) {
     case "query-started": {
@@ -113,6 +130,7 @@ export const queriesReducer: Reducer<QueriesState, QueriesAction> = (state, acti
 // QueryEntry
 // ---------------------------------------------------------------------------
 
+/** A query key paired with the Effect that fetches its data. */
 export type QueryEntry<T> = {
   readonly key: string;
   readonly fetch: Effect.Effect<T, unknown, never>;
@@ -129,18 +147,27 @@ interface QueryDefinitionBase<S extends { queries: QueriesState }> {
   ) => Effect.Effect<void, never, Scope.Scope>;
 }
 
+/** Definition returned by {@linkcode defineQuery} for single-key queries. */
 export interface SingleQueryDefinition<T, S extends { queries: QueriesState }>
   extends QueryDefinitionBase<S> {
   readonly select: (state: S) => QueryState<T> | undefined;
   readonly selectByKey?: "Use .select() for single-key queries";
 }
 
+/** Definition returned by {@linkcode defineQuery} for multi-key queries. */
 export interface MultiQueryDefinition<T, S extends { queries: QueriesState }>
   extends QueryDefinitionBase<S> {
   readonly select?: "Use .selectByKey(state, key) for multi-key queries";
   readonly selectByKey: (state: S, key: string) => QueryState<T> | undefined;
 }
 
+/**
+ * Define a reactive query that automatically fetches when its derived inputs change.
+ *
+ * Return a single {@linkcode QueryEntry} (or `null`) for a single-key query,
+ * or an array of entries for a multi-key query. The returned definition includes
+ * a `process` that should be passed to {@linkcode makeStore}.
+ */
 export function defineQuery<T, S extends { queries: QueriesState }>(
   name: string,
   derive: (state: S) => QueryEntry<T> | null,

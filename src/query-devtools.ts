@@ -1,3 +1,12 @@
+/**
+ * Developer tools panel for inspecting the katha query cache.
+ *
+ * Register the `<query-devtools>` custom element and set its `store` property
+ * to a {@linkcode StoreHandle} whose state includes a `queries` slice.
+ *
+ * @module
+ */
+
 import { formatDistanceToNow } from "date-fns";
 import { html, LitElement, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { property, state } from "lit/decorators.js";
@@ -86,6 +95,10 @@ function absoluteTime(ts: number | undefined): string {
 // Component
 // ---------------------------------------------------------------------------
 
+/**
+ * Lit custom element (`<query-devtools>`) that renders an interactive panel
+ * for inspecting and invalidating cached queries at runtime.
+ */
 export class QueryDevtools extends LitElement {
   createRenderRoot(): this {
     return this;

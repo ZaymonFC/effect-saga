@@ -63,6 +63,6 @@ await build({
     for (const name of Object.keys(pkg.peerDependencies ?? {})) {
       delete pkg.dependencies?.[name];
     }
-    Deno.writeTextFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+    Deno.writeTextFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   },
 });

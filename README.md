@@ -144,43 +144,84 @@ attach(store); // flushes buffered actions, replays subscribers
 
 ### Reducers
 
-Standard `(state, action) => state` with one twist: returning `undefined` means "no change". This enables `combineReducers` to preserve referential equality when a slice doesn't handle an action:
+Reducers are pure functions that take the current state and an action and return the next state. Actions describe *what happened*; the reducer decides *what it means*. Let's build a simple toast notification system:
+
+```ts
+import type { Reducer } from "@zaymonoid/katha";
+
+type Toast = { id: string; message: string; duration: number };
+type ToastAction =
+  | { id: "toast/show"; data: Toast }
+  | { id: "toast/clear"; data: { id: string } };
+
+const toastReducer: Reducer<Toast[], ToastAction> = (state, action) => {
+  switch (action.id) {
+    case "toast/show":
+      return [...state, action.data];
+    case "toast/clear":
+      return state.filter((t) => t.id !== action.data.id);
+    default:
+      return undefined; // no change
+  }
+};
+```
+
+Returning `undefined` means "this action isn't mine" — the previous state reference is preserved. `combineReducers` uses this to skip allocating a new object when no slice actually changed, keeping referential equality intact and avoiding unnecessary re-renders:
 
 ```ts
 import { combineReducers } from "@zaymonoid/katha";
-import type { Reducer, StateOf, ActionsOf } from "@zaymonoid/katha";
+import type { StateOf, ActionsOf } from "@zaymonoid/katha";
 
 const rootReducer = combineReducers({
+  toasts: toastReducer,
   users: usersReducer,
   posts: postsReducer,
 });
-// If postsReducer returns undefined, rootReducer returns the same
-// state object — same reference, no unnecessary re-renders.
 
-type AppState = StateOf<typeof rootReducer>;
-type AppAction = ActionsOf<typeof rootReducer>;
+type AppState = StateOf<typeof rootReducer>;   // { toasts: Toast[]; users: ...; posts: ... }
+type AppAction = ActionsOf<typeof rootReducer>; // ToastAction | UsersAction | PostsAction
 ```
+
+`StateOf` and `ActionsOf` extract the combined types from the reducer so you never write them by hand — define your slices, combine them, and the root types follow.
 
 ### Processes
 
-A process is an Effect that runs for the lifetime of the store. It receives a `StoreContext` with access to the action stream and state:
+The toast reducer can show and clear toasts — but what if we want them to auto-dismiss after a timeout? That's async coordination, and it's what processes are for.
+
+A process is a long-running Effect that reacts to actions and state changes. It runs for the lifetime of the store and is automatically cleaned up when the store scope closes. Here's the other half of our toast system:
 
 ```ts
-import type { Process } from "@zaymonoid/katha";
-
-const myProcess: Process<State, Action> = (ctx) =>
+const toastProcess = takeEvery(["toast/show"], (action, ctx) =>
   Effect.gen(function* () {
-    // Read state
-    const state = yield* ctx.select();
+    yield* Effect.sleep(Duration.millis(action.data.duration));
+    yield* ctx.put({ id: "toast/clear", data: { id: action.data.id } });
+  }),
+);
+```
 
-    // Dispatch actions
-    yield* ctx.put({ id: "loaded", data });
+`takeEvery` forks a new fiber for each `toast/show` action, so multiple toasts dismiss independently on their own timers. The process uses `ctx.put` to dispatch a `toast/clear` action back through the reducer — processes and reducers coordinate through the same action stream.
 
-    // Compose sub-processes
-    yield* someHandler(ctx);
-    yield* anotherHandler(ctx);
+Each process receives a `StoreContext`:
+
+| Member       | Type                    | Purpose                                  |
+| ------------ | ----------------------- | ---------------------------------------- |
+| `ctx.put`    | `(A) => Effect<void>`   | Reduce action into state, then publish   |
+| `ctx.select` | `() => Effect<S>`       | Read the current state snapshot          |
+| `ctx.state`  | `SubscriptionRef<S>`    | Reactive state stream                    |
+| `ctx.actions`| `PubSub<A>`             | Raw action stream (used by combinators)  |
+
+Processes compose by yielding sub-processes. Each `yield*` sets up listeners and returns immediately, so multiple sub-processes run concurrently as fibers:
+
+```ts
+const rootProcess: Process<AppState, AppAction> = (ctx) =>
+  Effect.gen(function* () {
+    yield* toastProcess(ctx);
+    yield* otherAppProcessA(ctx);
+    yield* otherAppProcessB(ctx);
   });
 ```
+
+Because processes are plain Effects, the entire Effect ecosystem works natively — retries, timeouts, resource management, dependency injection — without any katha-specific wrapper API.
 
 ### Combinators
 

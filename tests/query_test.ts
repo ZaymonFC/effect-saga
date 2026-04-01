@@ -185,7 +185,7 @@ Deno.test("defineQuery select reads from cache with correct type", () => {
   };
   const result = testQuery.select(state);
   assertEquals(result?.data, { total: 42 });
-  const _typed: QueryState<{ total: number }> | undefined = result; // biome-ignore lint/correctness/noUnusedVariables: type assertion
+  const _typed: QueryState<{ total: number }> | undefined = result;
 });
 
 Deno.test("defineQuery select returns undefined when derive returns null", () => {
