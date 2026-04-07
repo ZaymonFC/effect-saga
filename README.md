@@ -294,6 +294,17 @@ const root: Process<State, Action> = (ctx) =>
   });
 ```
 
+> **Best practice:** Call `combinators<State, Action>()` once and export the bound functions from a shared module. This keeps your type parameters in one place and gives every process file a consistent, fully-typed import.
+>
+> ```ts
+> // combinators.ts
+> import { combinators } from "@zaymonoid/katha";
+> import type { State, Action } from "./store.ts";
+>
+> export const { takeEvery, takeLatest, takeLeading, debounce } =
+>   combinators<State, Action>();
+> ```
+
 ### Value equality
 
 Unnecessary re-renders are avoided at two levels:
